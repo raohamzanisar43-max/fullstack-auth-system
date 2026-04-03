@@ -1,0 +1,160 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: tracerfy_postgres
+    environment:
+      POSTGRES_DB: tracerfy_db
+      POSTGRES_USER: tracerfy_user
+      POSTGRES_PASSWORD: tracerfy_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracerfy_user -d tracerfy_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tracerfy_network
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: tracerfy_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tracerfy_network
+
+  # Tracerfy Backend API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tracerfy_api
+    environment:
+      - DATABASE_URL=postgresql://tracerfy_user:tracerfy_password@postgres:5432/tracerfy_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - tracerfy_network
+    restart: unless-stopped
+
+  # Celery Worker (optional)
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tracerfy_celery_worker
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://tracerfy_user:tracerfy_password@postgres:5432/tracerfy_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      - ENABLE_CELERY=true
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - tracerfy_network
+    restart: unless-stopped
+    profiles:
+      - celery
+
+  # Celery Beat (optional scheduler)
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tracerfy_celery_beat
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://tracerfy_user:tracerfy_password@postgres:5432/tracerfy_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      - ENABLE_CELERY=true
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - tracerfy_network
+    restart: unless-stopped
+    profiles:
+      - celery
+
+  # Flower for Celery monitoring (optional)
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tracerfy_flower
+    command: celery -A app.workers.celery_app flower --port=5555
+    environment:
+      - DATABASE_URL=postgresql://tracerfy_user:tracerfy_password@postgres:5432/tracerfy_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+      - ENABLE_CELERY=true
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    networks:
+      - tracerfy_network
+    restart: unless-stopped
+    profiles:
+      - celery
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  tracerfy_network:
+    driver: bridge
