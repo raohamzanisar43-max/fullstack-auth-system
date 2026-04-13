@@ -91,7 +91,7 @@ class Settings(BaseSettings):
         return v
     
     class Config:
-        env_file = None  # Temporarily disabled
+        env_file = ".env"
         case_sensitive = True
 
 

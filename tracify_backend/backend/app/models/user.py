@@ -20,6 +20,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
+    is_verified = Column(Boolean, default=False)
     role = Column(String(50), default="user")
     
     # Timestamps
@@ -32,16 +33,13 @@ class User(Base):
     company = Column(String(255), nullable=True)
     bio = Column(Text, nullable=True)
     
-    # Email verification
-    is_verified = Column(Boolean, default=False)
-    verification_token = Column(String(255), nullable=True)
-    
-    # Password reset
-    reset_token = Column(String(255), nullable=True)
-    reset_token_expires = Column(DateTime(timezone=True), nullable=True)
-    
     # Relationships
     api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
+    credit_balance = relationship("CreditBalance", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    credit_transactions = relationship("CreditTransaction", back_populates="user", cascade="all, delete-orphan")
+    trace_jobs = relationship("TraceJob", back_populates="user", cascade="all, delete-orphan")
+    manual_searches = relationship("ManualSearch", back_populates="user", cascade="all, delete-orphan")
+    dnc_scrub_jobs = relationship("DncScrubJob", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, username={self.username})>"

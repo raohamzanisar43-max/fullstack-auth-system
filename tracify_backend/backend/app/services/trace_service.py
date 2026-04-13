@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from fastapi import UploadFile, HTTPException
 
-from app.models.trace import TraceJob, TraceResult, ManualSearch, TraceJobStatus, TraceType
+from app.models.trace import TraceJob, TraceResult, ManualSearch, TraceJobStatus, TraceType, PropertyRecord
 from app.models.user import User
 from app.schemas.trace import TraceJobCreate, TraceJobUpdate, ManualSearchCreate
 from app.core.exceptions import ValidationError, NotFoundError
@@ -25,22 +25,22 @@ class TraceService:
 
     def create_trace_job(self, user_id: int, job_data: TraceJobCreate, file: UploadFile) -> TraceJob:
         """Create a new trace job with file upload"""
-        
+
         # Validate file
         if not file.filename:
             raise ValidationError("No file provided")
-        
+
         if not file.filename.lower().endswith(('.csv', '.xlsx', '.xls')):
             raise ValidationError("Only CSV and Excel files are supported")
-        
+
         # Generate unique filename
         file_extension = os.path.splitext(file.filename)[1]
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         file_path = os.path.join(settings.UPLOAD_DIR, "traces", unique_filename)
-        
+
         # Ensure upload directory exists
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
+
         # Save file
         try:
             with open(file_path, "wb") as buffer:
@@ -48,16 +48,22 @@ class TraceService:
                 buffer.write(content)
         except Exception as e:
             raise ValidationError(f"Failed to save file: {str(e)}")
-        
-        # Count records in file
+
+        # Parse CSV and count records
         try:
-            record_count = self._count_records_in_file(file_path)
+            csv_rows = self._parse_csv_file(file_path)
+            record_count = len(csv_rows)
         except Exception as e:
-            # Clean up file if counting fails
+            # Clean up file if parsing fails
             if os.path.exists(file_path):
                 os.remove(file_path)
             raise ValidationError(f"Failed to process file: {str(e)}")
-        
+
+        if record_count == 0:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise ValidationError("CSV file is empty or has no data rows")
+
         # Create trace job
         trace_job = TraceJob(
             user_id=user_id,
@@ -67,14 +73,25 @@ class TraceService:
             total_records=record_count,
             file_path=file_path
         )
-        
+
         self.db.add(trace_job)
         self.db.commit()
         self.db.refresh(trace_job)
-        
-        # TODO: Start background processing
+
+        # Save individual CSV rows to database
+        try:
+            self._save_csv_rows_to_db(trace_job.id, csv_rows)
+        except Exception as e:
+            # Clean up job if row saving fails
+            self.db.delete(trace_job)
+            self.db.commit()
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise ValidationError(f"Failed to save CSV data: {str(e)}")
+
+        # TODO: Start background processing for actual skip tracing
         # self._start_trace_processing(trace_job.id)
-        
+
         return trace_job
 
     def get_user_trace_jobs(self, user_id: int, skip: int = 0, limit: int = 50) -> List[TraceJob]:
@@ -206,6 +223,55 @@ class TraceService:
             raise NotFoundError("Manual search not found")
         
         return manual_search
+
+    def _parse_csv_file(self, file_path: str) -> List[Dict[str, str]]:
+        """Parse CSV file and return list of rows"""
+        if not file_path.endswith('.csv'):
+            raise ValidationError("Only CSV files are supported")
+        
+        rows = []
+        with open(file_path, 'r', newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                rows.append(row)
+        return rows
+
+    def _save_csv_rows_to_db(self, job_id: int, csv_rows: List[Dict[str, str]]) -> None:
+        """Save individual CSV rows to database as trace_results and property_records"""
+        for row in csv_rows:
+            # Create trace result entry
+            trace_result = TraceResult(
+                trace_job_id=job_id,
+                input_record=json.dumps(row),  # Store original row as JSON
+                status="pending",
+                error_message=None
+            )
+            self.db.add(trace_result)
+            self.db.flush()  # Get trace_result.id without committing
+
+            # Extract and save property data if available
+            address = row.get('Address', row.get('address', ''))
+            city = row.get('City', row.get('city', ''))
+            state = row.get('State', row.get('state', ''))
+            zip_code = row.get('Zip', row.get('zip', row.get('Zip Code', '')))
+            
+            # Only create property record if we have at least address
+            if address or city or state:
+                first_name = row.get('First Name', row.get('first_name', ''))
+                last_name = row.get('Last Name', row.get('last_name', ''))
+                owner_name = f"{first_name} {last_name}".strip() if first_name or last_name else None
+
+                property_record = PropertyRecord(
+                    trace_result_id=trace_result.id,
+                    property_address=address[:500] if address else '',
+                    property_city=city[:100] if city else '',
+                    property_state=state[:2] if state else '',
+                    property_zip=zip_code[:10] if zip_code else '',
+                    owner_name=owner_name[:255] if owner_name else None
+                )
+                self.db.add(property_record)
+
+        self.db.commit()
 
     def _count_records_in_file(self, file_path: str) -> int:
         """Count records in uploaded file"""

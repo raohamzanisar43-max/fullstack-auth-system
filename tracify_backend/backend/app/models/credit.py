@@ -44,7 +44,6 @@ class CreditBalance(Base):
     
     # Relationships
     user = relationship("User", back_populates="credit_balance")
-    transactions = relationship("CreditTransaction", back_populates="user", cascade="all, delete-orphan")
 
 
 class CreditTransaction(Base):

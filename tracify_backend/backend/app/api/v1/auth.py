@@ -118,15 +118,21 @@ async def login(
         )
         
     except AuthenticationError as e:
+        print(f"Authentication error during login: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         )
+    except HTTPException as e:
+        raise e
     except Exception as e:
+        print(f"Unexpected error during login: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed"
+            detail=f"Login failed: {type(e).__name__}"
         )
 
 

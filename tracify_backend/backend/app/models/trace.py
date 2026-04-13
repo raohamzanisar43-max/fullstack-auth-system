@@ -44,8 +44,8 @@ class TraceJob(Base):
     credits_used = Column(Integer, default=0)
     
     # File paths
-    file_path = Column(Text, nullable=True)
-    result_file_path = Column(Text, nullable=True)
+    file_path = Column(String(500), nullable=True)
+    result_file_path = Column(String(500), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -65,10 +65,8 @@ class ManualSearch(Base):
     search_type = Column(Enum(ManualSearchType), nullable=False)
     search_query = Column(String(500), nullable=False)
     results = Column(Text, nullable=True)  # JSON string
-    credits_used = Column(Integer, default=0)
-    status = Column(Enum(TraceJobStatus), default=TraceJobStatus.PENDING, nullable=False)
-    
-    # Timestamps
+    credits_used = Column(Integer, default=1)
+    status = Column(String(50), default="pending", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
@@ -94,6 +92,7 @@ class TraceResult(Base):
     
     # Relationships
     trace_job = relationship("TraceJob", back_populates="results")
+    property_record = relationship("PropertyRecord", back_populates="trace_result", uselist=False)
 
 
 class PropertyRecord(Base):
