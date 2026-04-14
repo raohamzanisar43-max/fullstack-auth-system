@@ -77,10 +77,12 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             
             # Get user info if available
             user_id = getattr(request.state, "user_id", None)
-            user_email = getattr(request.state, "user", {}).get("email") if hasattr(request.state, "user") else None
+            user = getattr(request.state, "user", None)
+            user_email = (user.get("email") if isinstance(user, dict) else getattr(user, "email", None)) if user else None
             
             # Get API key info if available
-            api_key_name = getattr(request.state, "api_key", {}).get("name") if hasattr(request.state, "api_key") else None
+            api_key = getattr(request.state, "api_key", None)
+            api_key_name = (api_key.get("name") if isinstance(api_key, dict) else getattr(api_key, "name", None)) if api_key else None
             
             # Log request
             request_data = {
@@ -187,7 +189,8 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         """Log audit events for sensitive operations"""
         try:
             user_id = getattr(request.state, "user_id", None)
-            user_email = getattr(request.state, "user", {}).get("email") if hasattr(request.state, "user") else None
+            user = getattr(request.state, "user", None)
+            user_email = (user.get("email") if isinstance(user, dict) else getattr(user, "email", None)) if user else None
             client_ip = self._get_client_ip(request)
             
             audit_data = {

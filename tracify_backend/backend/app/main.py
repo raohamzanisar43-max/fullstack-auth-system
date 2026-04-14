@@ -62,8 +62,8 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting Tracerfy Backend...")
     
     try:
-        # Initialize database (optional for now)
-        # await initialize_database()
+        # Initialize database
+        await initialize_database()
         
         # Initialize background services
         # await initialize_background_services()
@@ -244,14 +244,6 @@ async def general_exception_handler(request: Request, exc: Exception):
 def setup_middleware():
     """Configure application middleware"""
     
-    # CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.ALLOWED_HOSTS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
     
     # Trusted host middleware (production)
     if settings.ENVIRONMENT == "production":
@@ -308,6 +300,15 @@ def setup_middleware():
     app.add_middleware(create_api_key_middleware)
     app.add_middleware(create_role_middleware)
     app.add_middleware(create_tenant_middleware)
+
+    # CORS middleware (added last to wrap everything)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[str(origin) for origin in settings.CORS_ORIGINS],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # Include API routes
