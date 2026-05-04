@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: Optional[str] = None
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:3000"]
+    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:3000"]
     
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -89,10 +89,15 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Any) -> Union[List[str], str]:
-        if isinstance(v, str) and not v.startswith("["):
+        if isinstance(v, str):
+            if v.startswith("["):
+                try:
+                    import json
+                    return json.loads(v)
+                except Exception:
+                    # Fallback if JSON parsing fails
+                    pass
             return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
-            return v
         return v
     
     @field_validator("ALLOWED_HOSTS", mode="before")
