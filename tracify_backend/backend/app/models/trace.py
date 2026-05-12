@@ -47,6 +47,9 @@ class TraceJob(Base):
     file_path = Column(String(500), nullable=True)
     result_file_path = Column(String(500), nullable=True)
     
+    # Column mapping (JSON string)
+    column_mapping = Column(Text, nullable=True)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

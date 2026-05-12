@@ -23,7 +23,7 @@ class TraceService:
     def __init__(self, db: Session):
         self.db = db
 
-    def create_trace_job(self, user_id: int, job_data: TraceJobCreate, file: UploadFile) -> TraceJob:
+    def create_trace_job(self, user_id: int, job_data: TraceJobCreate, file: UploadFile, column_mapping: Optional[Dict[str, str]] = None) -> TraceJob:
         """Create a new trace job with file upload"""
 
         # Validate file
@@ -71,7 +71,8 @@ class TraceService:
             type=job_data.type,
             status=TraceJobStatus.PENDING,
             total_records=record_count,
-            file_path=file_path
+            file_path=file_path,
+            column_mapping=json.dumps(column_mapping) if column_mapping else None
         )
 
         self.db.add(trace_job)
@@ -80,7 +81,7 @@ class TraceService:
 
         # Save individual CSV rows to database
         try:
-            self._save_csv_rows_to_db(trace_job.id, csv_rows)
+            self._save_csv_rows_to_db(trace_job.id, csv_rows, column_mapping)
         except Exception as e:
             # Clean up job if row saving fails
             self.db.delete(trace_job)
@@ -236,13 +237,20 @@ class TraceService:
                 rows.append(row)
         return rows
 
-    def _save_csv_rows_to_db(self, job_id: int, csv_rows: List[Dict[str, str]]) -> None:
+    def _save_csv_rows_to_db(self, job_id: int, csv_rows: List[Dict[str, str]], column_mapping: Optional[Dict[str, str]] = None) -> None:
         """Save individual CSV rows to database as trace_results and property_records"""
         for row in csv_rows:
+            # Apply column mapping if provided
+            mapped_row = row
+            if column_mapping:
+                mapped_row = {}
+                for target_field, source_column in column_mapping.items():
+                    mapped_row[target_field] = row.get(source_column, '')
+            
             # Create trace result entry
             trace_result = TraceResult(
                 trace_job_id=job_id,
-                input_record=json.dumps(row),  # Store original row as JSON
+                input_record=json.dumps(mapped_row),  # Store mapped row as JSON
                 status="pending",
                 error_message=None
             )
@@ -250,15 +258,19 @@ class TraceService:
             self.db.flush()  # Get trace_result.id without committing
 
             # Extract and save property data if available
-            address = row.get('Address', row.get('address', ''))
-            city = row.get('City', row.get('city', ''))
-            state = row.get('State', row.get('state', ''))
-            zip_code = row.get('Zip', row.get('zip', row.get('Zip Code', '')))
+            address = mapped_row.get('address', mapped_row.get('Address', ''))
+            city = mapped_row.get('city', mapped_row.get('City', ''))
+            state = mapped_row.get('state', mapped_row.get('State', ''))
+            zip_code = mapped_row.get('zipCode', mapped_row.get('Zip', mapped_row.get('zip', mapped_row.get('Zip Code', ''))))
+            phone_number = mapped_row.get('phoneNumber', mapped_row.get('Phone', mapped_row.get('phone', '')))
+            first_name = mapped_row.get('firstName', mapped_row.get('First Name', mapped_row.get('first_name', '')))
+            last_name = mapped_row.get('lastName', mapped_row.get('Last Name', mapped_row.get('last_name', '')))
+            mailing_address = mapped_row.get('mailingAddress', mapped_row.get('Mailing Address', ''))
+            mailing_city = mapped_row.get('mailingCity', mapped_row.get('Mailing City', ''))
+            mailing_state = mapped_row.get('mailingState', mapped_row.get('Mailing State', ''))
             
             # Only create property record if we have at least address
             if address or city or state:
-                first_name = row.get('First Name', row.get('first_name', ''))
-                last_name = row.get('Last Name', row.get('last_name', ''))
                 owner_name = f"{first_name} {last_name}".strip() if first_name or last_name else None
 
                 property_record = PropertyRecord(
@@ -267,7 +279,11 @@ class TraceService:
                     property_city=city[:100] if city else '',
                     property_state=state[:2] if state else '',
                     property_zip=zip_code[:10] if zip_code else '',
-                    owner_name=owner_name[:255] if owner_name else None
+                    owner_name=owner_name[:255] if owner_name else None,
+                    owner_address=mailing_address[:500] if mailing_address else None,
+                    owner_city=mailing_city[:100] if mailing_city else None,
+                    owner_state=mailing_state[:2] if mailing_state else None,
+                    owner_zip=zip_code[:10] if zip_code else None
                 )
                 self.db.add(property_record)
 
@@ -284,7 +300,7 @@ class TraceService:
             raise ValidationError("Excel file support not yet implemented")
 
     def _generate_results_file(self, trace_job: TraceJob) -> str:
-        """Generate results file for completed trace job"""
+        """Generate results file for completed trace job with correct column order"""
         results = self.get_trace_job_results(trace_job.id, trace_job.user_id)
         
         # Generate unique filename
@@ -294,12 +310,14 @@ class TraceService:
         # Ensure directory exists
         os.makedirs(os.path.dirname(result_file_path), exist_ok=True)
         
-        # Generate CSV file
+        # Generate CSV file with correct column order: First Name, Last Name, Phone Number, Zip Code, Mailing Address
         with open(result_file_path, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = [
-                'input_address', 'input_city', 'input_state', 'input_zip',
-                'owner_name', 'owner_address', 'owner_city', 'owner_state', 'owner_zip',
-                'phone_numbers', 'email_addresses', 'property_value', 'status', 'error_message'
+                'First Name',
+                'Last Name',
+                'Phone Number',
+                'Zip Code',
+                'Mailing Address'
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -308,21 +326,35 @@ class TraceService:
                 input_data = json.loads(result.input_record)
                 output_data = json.loads(result.output_record) if result.output_record else {}
                 
+                # Extract data from input_record (mapped data)
+                first_name = input_data.get('firstName', input_data.get('First Name', ''))
+                last_name = input_data.get('lastName', input_data.get('Last Name', ''))
+                phone_number = input_data.get('phoneNumber', input_data.get('Phone', ''))
+                zip_code = input_data.get('zipCode', input_data.get('Zip Code', input_data.get('Zip', '')))
+                mailing_address = input_data.get('mailingAddress', input_data.get('Mailing Address', ''))
+                
+                # If zip_code is not in mapped data, try to get it from address field
+                if not zip_code:
+                    # Try to extract zip from address if available
+                    import re
+                    address = input_data.get('address', input_data.get('Address', ''))
+                    if address:
+                        zip_match = re.search(r'\b\d{5}(-\d{4})?\b', address)
+                        if zip_match:
+                            zip_code = zip_match.group()
+                
+                # If output data exists, prefer it for phone numbers
+                if output_data:
+                    phone_numbers = output_data.get('phone_numbers', [])
+                    if phone_numbers:
+                        phone_number = ';'.join(phone_numbers) if isinstance(phone_numbers, list) else phone_numbers
+                
                 writer.writerow({
-                    'input_address': input_data.get('address', ''),
-                    'input_city': input_data.get('city', ''),
-                    'input_state': input_data.get('state', ''),
-                    'input_zip': input_data.get('zip', ''),
-                    'owner_name': output_data.get('owner_name', ''),
-                    'owner_address': output_data.get('owner_address', ''),
-                    'owner_city': output_data.get('owner_city', ''),
-                    'owner_state': output_data.get('owner_state', ''),
-                    'owner_zip': output_data.get('owner_zip', ''),
-                    'phone_numbers': ';'.join(output_data.get('phone_numbers', [])),
-                    'email_addresses': ';'.join(output_data.get('email_addresses', [])),
-                    'property_value': output_data.get('property_value', ''),
-                    'status': result.status,
-                    'error_message': result.error_message or ''
+                    'First Name': first_name,
+                    'Last Name': last_name,
+                    'Phone Number': phone_number,
+                    'Zip Code': zip_code,
+                    'Mailing Address': mailing_address
                 })
         
         return result_file_path

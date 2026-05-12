@@ -210,11 +210,15 @@ class ApiClient {
     name: string;
     type: string;
     file: File;
+    column_mapping?: Record<string, string>;
   }): Promise<TraceJob> {
     const formData = new FormData();
     formData.append("name", data.name);
     formData.append("type", data.type);
     formData.append("file", data.file);
+    if (data.column_mapping) {
+      formData.append("column_mapping", JSON.stringify(data.column_mapping));
+    }
 
     const response: AxiosResponse<TraceJob> = await this.client.post(
       "/traces/",

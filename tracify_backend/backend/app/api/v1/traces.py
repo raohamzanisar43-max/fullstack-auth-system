@@ -32,6 +32,7 @@ async def create_trace_job(
     name: str = Form(...),
     type: str = Form(...),
     file: UploadFile = File(...),
+    column_mapping: str = Form(None),
     request: Request = None,
     db: Session = Depends(get_db)
 ) -> Any:
@@ -46,7 +47,13 @@ async def create_trace_job(
             type=type
         )
         
-        trace_job = trace_service.create_trace_job(user.id, job_data, file)
+        # Parse column mapping if provided
+        mapping_dict = None
+        if column_mapping:
+            import json
+            mapping_dict = json.loads(column_mapping)
+        
+        trace_job = trace_service.create_trace_job(user.id, job_data, file, column_mapping=mapping_dict)
         return trace_job
         
     except ValidationError as e:

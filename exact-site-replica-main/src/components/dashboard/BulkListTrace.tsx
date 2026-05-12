@@ -15,6 +15,9 @@ const BulkListTrace = () => {
   const [recentJobs, setRecentJobs] = useState<TraceJob[]>([]);
   const [creditBalance, setCreditBalance] = useState<CreditBalance | null>(null);
   const [jobName, setJobName] = useState("");
+  const [showColumnMapping, setShowColumnMapping] = useState(false);
+  const [csvColumns, setCsvColumns] = useState<string[]>([]);
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -34,21 +37,39 @@ const BulkListTrace = () => {
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
     if (file?.name.endsWith(".csv")) {
       setSelectedFile(file);
       setJobName(file.name.replace(/\.[^/.]+$/, ""));
+      
+      // Parse CSV to get columns
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      if (lines.length > 0) {
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        setCsvColumns(headers);
+        setShowColumnMapping(true);
+      }
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFile(file);
       setJobName(file.name.replace(/\.[^/.]+$/, ""));
+      
+      // Parse CSV to get columns
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      if (lines.length > 0) {
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        setCsvColumns(headers);
+        setShowColumnMapping(true);
+      }
     }
   };
 
@@ -63,18 +84,31 @@ const BulkListTrace = () => {
       return;
     }
 
+    // Validate column mapping - only require address, city, state, firstName, lastName
+    const requiredFields = ['address', 'city', 'state', 'firstName', 'lastName'];
+    for (const field of requiredFields) {
+      if (!columnMapping[field]) {
+        toast.error(`Please map the ${field} field`);
+        return;
+      }
+    }
+
     setIsUploading(true);
     
     try {
       const traceJob = await apiClient.createTraceJob({
         name: jobName,
         type: traceType,
-        file: selectedFile
+        file: selectedFile,
+        column_mapping: columnMapping
       });
       
       toast.success("Trace job created successfully!");
       setSelectedFile(null);
       setJobName("");
+      setShowColumnMapping(false);
+      setColumnMapping({});
+      setCsvColumns([]);
       
       // Refresh jobs
       const jobs = await apiClient.getTraceJobs(0, 5);
@@ -246,6 +280,159 @@ const BulkListTrace = () => {
         <Button className="px-8" onClick={handleUpload} disabled={isUploading || !selectedFile}>
           {isUploading ? "Uploading..." : "Upload"}
         </Button>
+
+        {/* Column Mapping Section */}
+        {showColumnMapping && (
+          <div className="mt-6 p-4 border rounded-lg bg-background">
+            <h3 className="text-lg font-semibold mb-2">Make sure to select your matching columns for proper data processing</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              The Address, City and State selection fields correspond to the Property Address you intend to Trace.
+            </p>
+            
+            <p className="text-sm text-primary mb-4">
+              How should my list be formatted? <a href="#" className="underline">Click here and download a sample</a>
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select Address Column</label>
+                <select
+                  value={columnMapping.address || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, address: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select City Column</label>
+                <select
+                  value={columnMapping.city || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, city: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select State Column</label>
+                <select
+                  value={columnMapping.state || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, state: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select First Name Column</label>
+                <select
+                  value={columnMapping.firstName || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, firstName: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select Last Name Column</label>
+                <select
+                  value={columnMapping.lastName || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, lastName: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select Mailing Address Column</label>
+                <select
+                  value={columnMapping.mailingAddress || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, mailingAddress: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select Mailing City Column</label>
+                <select
+                  value={columnMapping.mailingCity || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, mailingCity: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Select Mailing State Column</label>
+                <select
+                  value={columnMapping.mailingState || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, mailingState: e.target.value})}
+                  className="w-full p-2 border rounded-md bg-background"
+                >
+                  <option value="">Select column...</option>
+                  {csvColumns.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium mb-2 block">Discount Code (optional)</label>
+                <input
+                  type="text"
+                  value={columnMapping.discountCode || ''}
+                  onChange={(e) => setColumnMapping({...columnMapping, discountCode: e.target.value})}
+                  placeholder="Enter discount code"
+                  className="w-full p-2 border rounded-md bg-background"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <Button onClick={handleUpload} disabled={isUploading}>
+                {isUploading ? "Processing..." : "Submit"}
+              </Button>
+              <Button variant="outline" onClick={() => {
+                setShowColumnMapping(false);
+                setSelectedFile(null);
+                setColumnMapping({});
+                setCsvColumns([]);
+              }}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Recent Jobs Section */}
